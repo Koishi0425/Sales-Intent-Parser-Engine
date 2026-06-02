@@ -11,21 +11,10 @@ from intent_parser.config import Settings
 from intent_parser.models import CustomerDemand, RegionScope, ScenarioType
 
 
-SYSTEM_PROMPT = """你是企业网络架构师和售前需求分析助手。
-请把销售反馈的口语化客户需求转换为严格 JSON。
-你需要完成：
-1. 抽取访问来源、目标位置、用户规模、预算、试用或合同周期。
-2. 判断 source_scope / target_scope: domestic, overseas, unknown。
-3. 若涉及办公上网且没有明确带宽，按每人 1 Mbps 估算 bandwidth_est_mbps。
-4. 若出现固定 IP、公网 IP、专线、大带宽等语义，requires_fixed_ip 设为 true 或提高场景优先级。
-5. 缺失但业务决策需要的字段写入 missing_fields。
-
-Few-shot:
-输入：客户上海办公室大概10个人，想先试一个月访问美国 SaaS，预算5000左右。
-输出：{"access_source":"上海办公室","source_scope":"domestic","target_region":"美国 SaaS","target_scope":"overseas","user_count":10,"bandwidth_est_mbps":10,"duration":"试用1个月","budget":5000,"requires_fixed_ip":false,"scenario_type":"overseas_access","raw_keywords":["上海","10个人","试用1个月","美国 SaaS"],"confidence":0.9,"missing_fields":[]}
-
-输入：深圳和广州两个点要内网互通，50人办公，最好固定公网 IP。
-输出：{"access_source":"深圳、广州","source_scope":"domestic","target_region":"国内多点组网","target_scope":"domestic","user_count":50,"bandwidth_est_mbps":50,"duration":null,"budget":null,"requires_fixed_ip":true,"scenario_type":"dedicated_ip_or_high_bandwidth","raw_keywords":["深圳","广州","50人","固定公网 IP"],"confidence":0.88,"missing_fields":["duration","budget"]}
+SYSTEM_PROMPT = """提取客户网络需求为 JSON，不要 Markdown 或解释。
+字段：access_source, source_scope(domestic/overseas/unknown), target_region, target_scope(domestic/overseas/unknown), user_count, bandwidth_est_mbps, duration, budget, requires_fixed_ip, scenario_type(overseas_access/domestic_networking/dedicated_ip_or_high_bandwidth/trial_or_poc/unknown), raw_keywords, confidence, missing_fields。
+规则：未提带宽且有人数时按每人 1Mbps 估算；固定IP/公网IP/专线/大带宽置 requires_fixed_ip=true 或对应 scenario_type；缺失关键字段写入 missing_fields。
+例：上海办公室10人试用1个月访问美国SaaS预算5000 -> {"access_source":"上海办公室","source_scope":"domestic","target_region":"美国 SaaS","target_scope":"overseas","user_count":10,"bandwidth_est_mbps":10,"duration":"试用1个月","budget":5000,"requires_fixed_ip":false,"scenario_type":"overseas_access","raw_keywords":["上海","10人","美国 SaaS"],"confidence":0.9,"missing_fields":[]}
 """
 
 
@@ -56,17 +45,43 @@ class OpenAICompatibleParser:
             client_kwargs["base_url"] = self.settings.llm_base_url
 
         client = OpenAI(**client_kwargs)
-        response = client.chat.completions.create(
-            model=self.settings.llm_model,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"请分析以下需求并输出 JSON：{raw_text}"},
-            ],
-            temperature=0.1,
-        )
+        request_kwargs = self.build_request_kwargs(raw_text)
+
+        response = client.chat.completions.create(**request_kwargs)
         content = response.choices[0].message.content or "{}"
         return parse_customer_demand_json(content)
+
+    def build_request_kwargs(self, raw_text: str) -> dict[str, Any]:
+        system_message: dict[str, Any] = {"role": "system", "content": SYSTEM_PROMPT}
+        if self.settings.llm_cache_control:
+            system_message["content"] = [
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": self.settings.llm_cache_control},
+                }
+            ]
+
+        request_kwargs: dict[str, Any] = {
+            "model": self.settings.llm_model,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                system_message,
+                {"role": "user", "content": f"输出 JSON：{raw_text}"},
+            ],
+            "temperature": self.settings.llm_temperature,
+            "max_tokens": self.settings.llm_max_tokens,
+            "timeout": self.settings.llm_timeout_seconds,
+            "stream": False,
+        }
+        extra_body: dict[str, Any] = {}
+        if self.settings.llm_enable_thinking is not None:
+            extra_body["enable_thinking"] = self.settings.llm_enable_thinking
+        if self.settings.llm_enable_search is not None:
+            extra_body["enable_search"] = self.settings.llm_enable_search
+        if extra_body:
+            request_kwargs["extra_body"] = extra_body
+        return request_kwargs
 
 
 class HeuristicDemandParser:

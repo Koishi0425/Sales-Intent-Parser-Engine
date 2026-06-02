@@ -53,6 +53,12 @@ python -m pip install pydantic
 set LLM_API_KEY=your-api-key
 set LLM_MODEL=gpt-4o-mini
 set LLM_BASE_URL=
+set LLM_ENABLE_THINKING=false
+set LLM_ENABLE_SEARCH=
+set LLM_CACHE_CONTROL=
+set LLM_TEMPERATURE=0
+set LLM_MAX_TOKENS=300
+set LLM_TIMEOUT_SECONDS=60
 ```
 
 如果使用 Qwen 或其他 OpenAI-compatible API，可设置：
@@ -61,6 +67,15 @@ set LLM_BASE_URL=
 set LLM_BASE_URL=https://your-compatible-endpoint/v1
 set LLM_MODEL=your-model-name
 ```
+
+对结构化抽取任务，建议关闭模型思考并限制输出长度：
+
+- `LLM_ENABLE_THINKING=false`：对 Qwen/DashScope 这类支持 thinking 的模型关闭思考模式。
+- `LLM_ENABLE_SEARCH=false`：对 DashScope/Qwen 明确关闭联网搜索，避免额外检索延迟。
+- `LLM_CACHE_CONTROL=ephemeral`：可选。对 DashScope 显式缓存固定 prompt；只有固定前缀较长时更有价值，短 prompt 可保持为空。
+- `LLM_TEMPERATURE=0`：降低输出发散，提升 JSON 稳定性。
+- `LLM_MAX_TOKENS=300`：限制解析结果长度，避免不必要的输出成本。
+- `LLM_TIMEOUT_SECONDS=60`：控制单次模型请求最长等待时间。
 
 业务默认值：
 

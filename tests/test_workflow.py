@@ -9,7 +9,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from intent_parser.config import Settings
 from intent_parser.models import RegionScope, ScenarioType
-from intent_parser.parsers import HeuristicDemandParser, parse_customer_demand_json
+from intent_parser.parsers import (
+    HeuristicDemandParser,
+    OpenAICompatibleParser,
+    parse_customer_demand_json,
+)
 from intent_parser.workflow import DemandWorkflow
 
 
@@ -19,6 +23,12 @@ class WorkflowTest(unittest.TestCase):
             llm_api_key=None,
             llm_model="test",
             llm_base_url=None,
+            llm_enable_thinking=False,
+            llm_enable_search=None,
+            llm_cache_control=None,
+            llm_temperature=0,
+            llm_max_tokens=300,
+            llm_timeout_seconds=60,
             per_user_bandwidth_mbps=1,
             high_bandwidth_threshold_mbps=100,
         )
@@ -81,6 +91,37 @@ class WorkflowTest(unittest.TestCase):
 
         self.assertEqual(demand.user_count, 10)
         self.assertEqual(demand.target_scope, RegionScope.overseas)
+
+    def test_llm_request_uses_low_latency_options(self) -> None:
+        settings = Settings(
+            llm_api_key="test-key",
+            llm_model="qwen-test",
+            llm_base_url="https://example.test/v1",
+            llm_enable_thinking=False,
+            llm_enable_search=False,
+            llm_cache_control="ephemeral",
+            llm_temperature=0,
+            llm_max_tokens=300,
+            llm_timeout_seconds=30,
+            per_user_bandwidth_mbps=1,
+            high_bandwidth_threshold_mbps=100,
+        )
+
+        request_kwargs = OpenAICompatibleParser(settings).build_request_kwargs(
+            "上海办公室10人访问美国 SaaS。"
+        )
+
+        self.assertEqual(request_kwargs["temperature"], 0)
+        self.assertEqual(request_kwargs["max_tokens"], 300)
+        self.assertFalse(request_kwargs["stream"])
+        self.assertEqual(
+            request_kwargs["extra_body"],
+            {"enable_thinking": False, "enable_search": False},
+        )
+        self.assertEqual(
+            request_kwargs["messages"][0]["content"][0]["cache_control"],
+            {"type": "ephemeral"},
+        )
 
 
 if __name__ == "__main__":
